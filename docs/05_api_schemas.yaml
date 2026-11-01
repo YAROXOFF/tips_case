@@ -14,9 +14,9 @@ info:
 servers:
   - url: http://localhost:8083
 
-# ---------- ОБРАЗЕЦ ----------
 components:
   schemas:
+    # ---------- ОБРАЗЕЦ ----------
     QRPayload:
       type: object
       required: [merchant_id, employee_id, receipt_id, nonce, exp, signature]
@@ -28,42 +28,75 @@ components:
         exp: {type: string, format: date-time}
         signature: {type: string, pattern: '^[a-f0-9]{16}$'}
 
-# ---------- TODO ----------
+    # ---------- ЗАПОЛНЕНО ----------
     QRResponse:
       type: object
+      required: [qr_id, merchant_id, employee_id, employee_name, receipt_id, base_amount, currency, tip_options]
       properties:
-        # TODO: qr_id, merchant_id, employee_id, employee_name,
-        #       receipt_id, base_amount, currency, tip_options
-        ?
+        qr_id: {type: string, pattern: '^qr_[0-9]{3}$', example: qr_001}
+        merchant_id: {type: string, pattern: '^m_[0-9]{3}$', example: m_001}
+        employee_id: {type: string, pattern: '^e_[0-9]{3}$', example: e_001}
+        employee_name: {type: string, example: "Иванов И."}
+        receipt_id: {type: string, pattern: '^r_[0-9]{4}$', example: r_1001}
+        base_amount: {type: number, format: double, minimum: 0, exclusiveMinimum: true, maximum: 1000000, example: 637.00}
+        currency: {type: string, example: RUB}
+        tip_options:
+          type: array
+          description: Доступные проценты чаевых для экрана выбора
+          items: {type: integer, minimum: 0, maximum: 50}
+          example: [0, 5, 10, 15, 20]
 
     TipCreate:
       type: object
       required: [qr_id, receipt_id, base_amount, tip_pct]
       properties:
-        # TODO: qr_id, receipt_id, base_amount, tip_pct (0..50),
-        #       idempotency_key
-        ?
+        qr_id: {type: string, pattern: '^qr_[0-9]{3}$', example: qr_001}
+        receipt_id: {type: string, pattern: '^r_[0-9]{4}$', example: r_1001}
+        base_amount: {type: number, format: double, minimum: 0, exclusiveMinimum: true, maximum: 1000000, example: 637.00}
+        tip_pct: {type: number, minimum: 0, maximum: 50, example: 5}
+        idempotency_key:
+          type: string
+          description: Ключ идемпотентности; повтор с тем же ключом возвращает уже созданный платёж
+          example: "k-7f3a9c"
 
     Payment:
       type: object
+      required: [payment_id, status, amount_total, tip_amount]
       properties:
-        # TODO: payment_id, status (CREATED/PENDING/SUCCESS/DECLINED/CANCELED),
-        #       amount_total, tip_amount, confirm_token, error_code
-        ?
+        payment_id: {type: string, pattern: '^p_[0-9]{4}$', example: p_0001}
+        status: {type: string, enum: [CREATED, PENDING, SUCCESS, DECLINED, CANCELED]}
+        amount_total: {type: number, format: double, description: "Чек плюс чаевые", example: 668.85}
+        tip_amount: {type: number, format: double, example: 31.85}
+        confirm_token:
+          type: string
+          description: Токен для подтверждения платежа (выдаётся при создании)
+          example: "ct_91b2e4"
+        error_code:
+          type: string
+          nullable: true
+          description: Код ошибки, если платёж не прошёл
+          example: null
 
     Report:
       type: object
       properties:
-        # TODO: merchant_id, period, tips_total, payments_count,
-        #       avg_tip_pct, success_rate
-        ?
+        merchant_id: {type: string, example: m_001}
+        period: {type: string, description: "Период в формате YYYY-MM", example: "2025-11"}
+        tips_total: {type: number, format: double, minimum: 0, example: 414.85}
+        payments_count: {type: integer, minimum: 0, example: 6}
+        avg_tip_pct: {type: number, format: double, example: 9.0}
+        success_rate: {type: number, format: double, minimum: 0, maximum: 1, example: 0.83}
 
     Error:
       type: object
       required: [error_code, message]
       properties:
-        # TODO: error_code, message, retryable, details
-        ?
+        error_code:
+          type: string
+          example: QR_EXPIRED
+        message: {type: string, example: "QR недействителен: срок действия истёк"}
+        retryable: {type: boolean, description: "Можно ли повторить запрос после исправления", example: true}
+        details: {type: object, additionalProperties: true}
 
 paths:
   # ---------- ОБРАЗЕЦ ----------
@@ -77,38 +110,135 @@ paths:
             application/json:
               schema: {type: object, properties: {status: {type: string}}}
 
-  # ---------- TODO ----------
+  # ---------- ЗАПОЛНЕНО ----------
   /api/v1/qr/{qr_id}:
     get:
-      summary: TODO — данные QR для формы чаевых
+      summary: Получить данные QR для формы чаевых
       parameters: [{name: qr_id, in: path, required: true, schema: {type: string}}]
-      # TODO: responses 200 (QRResponse), 404, 410 (QR_EXPIRED), 422 (INVALID_QR)
-      ?
+      responses:
+        '200':
+          description: QR действителен, данные для экранов диалога
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QRResponse'}
+        '403':
+          description: Мерчант заблокирован (MERCHANT_BLOCKED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: QR не найден
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: nonce уже использован (QR_USED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '410':
+          description: Срок действия QR истёк (QR_EXPIRED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: Подпись QR не совпала (INVALID_QR)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/tips:
     post:
-      summary: TODO — создать платёж с чаевыми
-      # TODO: requestBody TipCreate, responses 201 (Payment), 409, 422
-      ?
+      summary: Создать платёж с чаевыми
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TipCreate'}
+      responses:
+        '200':
+          description: Повтор idempotency_key, возвращён существующий платёж (P-2)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Payment'}
+        '201':
+          description: Платёж создан в статусе CREATED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Payment'}
+        '403':
+          description: Мерчант заблокирован (MERCHANT_BLOCKED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: QR уже использован (QR_USED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '410':
+          description: Срок действия QR истёк (QR_EXPIRED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: Ошибка данных (INVALID_QR, RECEIPT_MISMATCH, TIP_OUT_OF_RANGE, AMOUNT_OUT_OF_RANGE)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/payments/{id}/confirm:
     post:
-      summary: TODO — подтвердить платёж
-      # TODO: responses 200, 402, 409
-      ?
+      summary: Подтвердить платёж
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200':
+          description: Платёж обработан, статус SUCCESS (или PENDING, если эмулятор не дал ответа)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Payment'}
+        '402':
+          description: Платёж отклонён шлюзом (PAYMENT_DECLINED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Платёж не в статусе CREATED или неверный токен
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/payments/{id}/cancel:
     post:
-      summary: TODO — отменить платёж (до подтверждения)
-      # TODO: responses 200, 409
-      ?
+      summary: Отменить платёж (до подтверждения)
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200':
+          description: Платёж отменён, статус CANCELED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Payment'}
+        '409':
+          description: Отмена невозможна из PENDING и SUCCESS (CANCEL_NOT_ALLOWED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/reports/tips:
     get:
-      summary: TODO — отчёт по чаевым
+      summary: Отчёт по чаевым за период
       parameters:
         - {name: merchant_id, in: query, required: true, schema: {type: string}}
         - {name: from, in: query, required: true, schema: {type: string, format: date}}
         - {name: to, in: query, required: true, schema: {type: string, format: date}}
-      # TODO: responses 200 (Report), 403
-      ?
+      responses:
+        '200':
+          description: Отчёт по мерчанту
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Report'}
+        '403':
+          description: Нет прав на просмотр отчёта по этому заведению
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
