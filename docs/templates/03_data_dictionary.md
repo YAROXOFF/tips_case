@@ -1,114 +1,60 @@
-\# Data dictionary — кейс 3
+# Data dictionary — кейс 3
 
+## Как заполнять
 
-
-\## Как заполнять
-
-Четыре файла: merchants (4 колонки), employees (4), payments (7), qr\_links (7).
-
+Четыре файла: merchants (4 колонки), employees (4), payments (7), qr_links (7).
 Два образца — по merchants и payments. Остальные — заполни сам.
 
-
-
-\## Образец merchants (не трогать)
-
-
+## Образец merchants (не трогать)
 
 | Файл | Поле | Тип | Обяз. | Ограничение | Пример | Код ошибки |
-
 |---|---|---|---|---|---|---|
-
-| merchants | merchant\_id | string | да | m\_NNN | m\_001 | — |
-
+| merchants | merchant_id | string | да | m_NNN | m_001 | — |
 | merchants | name | string | да | 1–100 символов | Вкус-Сервис Тверская | — |
-
-| merchants | status | enum | да | ACTIVE/BLOCKED/PENDING | ACTIVE | MERCHANT\_BLOCKED |
-
+| merchants | status | enum | да | ACTIVE/BLOCKED/PENDING | ACTIVE | MERCHANT_BLOCKED |
 | merchants | description | string | нет | 0–200 | Ресторан сети | — |
 
-
-
-\## Образец payments (не трогать)
-
-
+## Образец payments (не трогать)
 
 | Файл | Поле | Тип | Обяз. | Ограничение | Пример | Код ошибки |
-
 |---|---|---|---|---|---|---|
-
-| payments | payment\_id | string | да | p\_NNNN | p\_0001 | — |
-
-| payments | amount | decimal | да | > 0, ≤ 1 000 000 | 637.00 | AMOUNT\_OUT\_OF\_RANGE |
-
-| payments | tip | decimal | да | ≥ 0, ≤ amount × 0.5 | 63.70 | TIP\_OUT\_OF\_RANGE |
-
+| payments | payment_id | string | да | p_NNNN | p_0001 | — |
+| payments | amount | decimal | да | > 0, ≤ 1 000 000 | 637.00 | AMOUNT_OUT_OF_RANGE |
+| payments | tip | decimal | да | ≥ 0, ≤ amount × 0.5 | 63.70 | TIP_OUT_OF_RANGE |
 | payments | status | enum | да | CREATED/PENDING/SUCCESS/DECLINED/CANCELED | SUCCESS | — |
 
-
-
-\## Твоя таблица — employees
-
-
+## Твоя таблица — employees
 
 | Поле | Тип | Обяз. | Ограничение | Пример | Код ошибки |
-
 |---|---|---|---|---|---|
+| employee_id | string | да | e_NNN, уникален | e_001 | — |
+| merchant_id | string | да | m_NNN, ссылка на merchants.merchant_id | m_001 | MERCHANT_NOT_FOUND |
+| name | string | да | 1–100 символов | Иван Петров | — |
+| payment_details | string | да | только маска ****NNNN (ровно 4 последние цифры), полный номер не хранится | ****1234 | INVALID_PAYMENT_DETAILS |
 
-| employee\_id | ? | ? | ? | ? | ? |
-
-| merchant\_id | ? | ? | ? | ? | ? |
-
-| name | ? | ? | ? | ? | ? |
-
-| payment\_details | ? | ? | ? | ? | ? |
-
-
-
-\## Твоя таблица — qr\_links
-
-
+## Твоя таблица — qr_links
 
 | Поле | Тип | Обяз. | Ограничение | Пример | Код ошибки |
-
 |---|---|---|---|---|---|
+| qr_id | string | да | qr_NNNN, уникален | qr_0001 | — |
+| merchant_id | string | да | m_NNN, ссылка на merchants.merchant_id | m_001 | MERCHANT_NOT_FOUND |
+| employee_id | string | да | e_NNN, ссылка на employees.employee_id | e_001 | EMPLOYEE_NOT_FOUND |
+| receipt_id | string | да | r_NNNN, уникален в рамках чека | r_0001 | — |
+| nonce | string | да | одноразовый, ровно 6 hex-символов | a1b2c3 | INVALID_NONCE |
+| exp | datetime | да | ISO 8601 UTC, > now, обычно now + 24 ч | 2025-01-01T12:00:00Z | QR_EXPIRED |
+| signature | string | да | HMAC-SHA256, 16 hex-символов | 9f8e7d6c5b4a3928 | INVALID_SIGNATURE |
 
-| qr\_id | ? | ? | ? | ? | ? |
+## Критерий приёмки
 
-| merchant\_id | ? | ? | ? | ? | ? |
+- [x] Все 4 файла описаны (22 колонки)
+- [x] Для каждого поля указан тип и ограничение
+- [x] Для полей с валидацией — код ошибки из 08_errors.md
+- [x] Пример взят из реального CSV
+- [x] payment_details — только маска (****NNNN)
 
-| employee\_id | ? | ? | ? | ? | ? |
+## Подсказки
 
-| receipt\_id | ? | ? | ? | ? | ? |
-
-| nonce | ? | ? | ? | ? | ? |
-
-| exp | ? | ? | ? | ? | ? |
-
-| signature | ? | ? | ? | ? | ? |
-
-
-
-\## Критерий приёмки
-
-\- \[ ] Все 4 файла описаны (22 колонки)
-
-\- \[ ] Для каждого поля указан тип и ограничение
-
-\- \[ ] Для полей с валидацией — код ошибки из 08\_errors.md
-
-\- \[ ] Пример взят из реального CSV
-
-\- \[ ] payment\_details — только маска (\*\*\*\*NNNN)
-
-
-
-\## Подсказки
-
-\- payment\_details — это реквизиты для выплат, не для оплаты.
-
-\- nonce — одноразовый, 6 hex.
-
-\- exp — время, после которого QR недействителен (обычно 24 ч).
-
-\- signature — HMAC-SHA256, 16 hex.
-
+- payment_details — это реквизиты для выплат, не для оплаты.
+- nonce — одноразовый, 6 hex.
+- exp — время, после которого QR недействителен (обычно 24 ч).
+- signature — HMAC-SHA256, 16 hex.
