@@ -26,7 +26,7 @@
 |---|---|---|---|
 | 1 | Валидация запроса и идемпотентность | Заполнены qr_id, receipt_id, base_amount, tip_pct, idempotency_key; 0 < base_amount ≤ 1 000 000 (P-1); 0 ≤ tip_pct ≤ 50. Если idempotency_key уже встречался, возвращается существующий платёж (P-2) | AMOUNT_OUT_OF_RANGE или TIP_OUT_OF_RANGE (422), платёж не создаётся. Повтор ключа не ошибка: HTTP 200 и старый платёж |
 | 2 | Проверка QR | QR найден; подпись HMAC совпадает (Q-1); exp ≥ now (Q-2); nonce не использован (Q-3); мерчант ACTIVE (Q-4); receipt_id совпадает с QR (Q-5) | INVALID_QR (422), QR_EXPIRED (410), QR_USED (409), MERCHANT_BLOCKED (403), RECEIPT_MISMATCH (422). Платёж не создаётся |
-| 3 | Расчёт суммы | tip_amount = base_amount × tip_pct / 100; amount_total = base_amount + tip_amount; amount_total ≤ 2 000 000 (P-3) | AMOUNT_OUT_OF_RANGE (422) |
+| 3 | Расчёт суммы | ... amount_total = base_amount + tip_amount; amount_total ≤ 1 200 000 (P-3) | AMOUNT_OUT_OF_RANGE (422) |
 | 4 | Создание платежа | Генерируется payment_id (p_NNNN) и confirm_token; платёж получает статус CREATED | Сбой записи: платёж не создан, запрос можно повторить с тем же ключом |
 | 5 | Подтверждение | Платёж в статусе CREATED, confirm_token верный; статус меняется на PENDING, запрос уходит в эмулятор | Платёж не в CREATED или токен неверный: 409, статус не меняется |
 | 6 | Результат | Эмулятор считает h и возвращает код; статус становится SUCCESS, DECLINED, PENDING или CANCELED. При SUCCESS nonce помечается использованным | DECLINED: 402, PAYMENT_DECLINED, QR остаётся действующим до exp. PENDING: клиент проверяет позже |
@@ -88,7 +88,7 @@
 | merchant BLOCKED | MERCHANT_BLOCKED | 403 | нет |
 | receipt_id не совпадает с QR | RECEIPT_MISMATCH | 422 | нет |
 | tip_pct > 50 | TIP_OUT_OF_RANGE | 422 | нет |
-| amount_total > 2 000 000 | AMOUNT_OUT_OF_RANGE | 422 | нет |
+| amount_total > 1 200 000 | AMOUNT_OUT_OF_RANGE | 422 | нет |
 | тот же idempotency_key | — (возвращается существующий платёж) | 200 | — |
 | эмулятор вернул 7 (отказ) | PAYMENT_DECLINED | 402 | нет (другой способ оплаты) |
 | эмулятор вернул 8 | GATEWAY_TIMEOUT (статус PENDING) | 202 | да (проверить статус позже) |

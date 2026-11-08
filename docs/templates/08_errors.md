@@ -1,3 +1,5 @@
+# ER-модель данных — кейс 3
+
 
 ## 1. Сущности (6)
 
@@ -47,7 +49,8 @@
 | Поле | Тип | PK/FK | Обяз. | Ограничение |
 |---|---|---|---|---|
 | payment_id | string | PK | да | p_NNNN |
-| qr_id | string | FK → QR | да | qr_NNN |
+| merchant_id | string | FK → Merchant | да | m_NNN |
+| employee_id | string | FK → Employee | да | e_NNN |
 | amount | decimal | — | да | > 0, ≤ 1 000 000 |
 | tip | decimal | — | да | ≥ 0, ≤ amount × 0.5 |
 | status | enum | — | да | CREATED/PENDING/SUCCESS/DECLINED/CANCELED |
@@ -82,13 +85,13 @@
 | Merchant → Employee | 1:N | у ресторана много официантов, официант работает в одном ресторане |
 | Merchant → QR | 1:N | ресторан создаёт много QR, каждый QR принадлежит одному ресторану |
 | Employee → QR | 1:N | у официанта много QR (по одному на чек) |
-| QR → Payment | 1:N | по одному QR может быть несколько попыток платежа |
+| QR → Payment | 1:1 | один QR создаётся под один чек и используется для одной успешной оплаты (nonce одноразовый); повторные запросы с тем же idempotency_key возвращают существующий платёж, а не создают новый |
 | Merchant → Report | 1:N | у ресторана по одному отчёту за каждый месяц |
 | Payment → AuditEvent | 1:N | каждый переход статуса платежа это отдельное событие аудита |
 
 ## 4. Диаграмма (draw.io)
 
-Файл диаграммы: `er_diagram.png` (будет добавлен).
+Файл диаграммы: `er_diagram.png` 
 
 ## 5. Критерий приёмки
 
@@ -97,4 +100,4 @@
 - [x] Связи описаны с типом (1:N) и обоснованием
 - [x] payment_details — только маска `****NNNN`
 - [x] signature — HMAC-SHA256, не plain hash
-- [ ] Диаграмма в draw.io с PK/FK и связями
+- [x] Диаграмма в draw.io с PK/FK и связями

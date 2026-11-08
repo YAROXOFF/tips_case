@@ -109,7 +109,7 @@ paths:
           content:
             application/json:
               schema: {type: object, properties: {status: {type: string}}}
-
+              
   # ---------- ЗАПОЛНЕНО ----------
   /api/v1/qr/{qr_id}:
     get:
@@ -191,14 +191,33 @@ paths:
     post:
       summary: Подтвердить платёж
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm_token]
+              properties:
+                confirm_token: {type: string, example: "ct_91b2e4"}
       responses:
         '200':
-          description: Платёж обработан, статус SUCCESS (или PENDING, если эмулятор не дал ответа)
+          description: Платёж успешно обработан, статус SUCCESS
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Payment'}
+        '202':
+          description: Эмулятор не дал итогового ответа, статус PENDING (GATEWAY_TIMEOUT)
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Payment'}
         '402':
           description: Платёж отклонён шлюзом (PAYMENT_DECLINED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Платёж не найден
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -218,6 +237,11 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Payment'}
+        '404':
+          description: Платёж не найден
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '409':
           description: Отмена невозможна из PENDING и SUCCESS (CANCEL_NOT_ALLOWED)
           content:
@@ -228,17 +252,49 @@ paths:
     get:
       summary: Отчёт по чаевым за период
       parameters:
-        - {name: merchant_id, in: query, required: true, schema: {type: string}}
+        - {name: merchant_id, in: query, required: false, schema: {type: string}, description: "Обязателен, если не указан employee_id"}
+        - {name: employee_id, in: query, required: false, schema: {type: string}, description: "Обязателен, если не указан merchant_id"}
         - {name: from, in: query, required: true, schema: {type: string, format: date}}
         - {name: to, in: query, required: true, schema: {type: string, format: date}}
       responses:
         '200':
-          description: Отчёт по мерчанту
+          description: Отчёт по мерчанту или официанту
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Report'}
         '403':
           description: Нет прав на просмотр отчёта по этому заведению
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/reports/tips/daily:
+    get:
+      summary: Отчёт по чаевым по дням
+      parameters:
+        - {name: merchant_id, in: query, required: true, schema: {type: string}}
+        - {name: from, in: query, required: true, schema: {type: string, format: date}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Отчёт по дням
+          content:
+            application/json:
+              schema: 
+                type: object
+                properties:
+                  merchant_id: {type: string}
+                  daily:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date: {type: string, format: date}
+                        tips_total: {type: number}
+                        payments_count: {type: integer}
+                        avg_tip_pct: {type: number}
+        '403':
+          description: Нет прав на просмотр отчёта
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
