@@ -22,6 +22,9 @@
 | payments | amount | decimal | да | > 0, ≤ 1 000 000 | 637.00 | AMOUNT_OUT_OF_RANGE |
 | payments | tip | decimal | да | ≥ 0, ≤ amount × 0.5 | 63.70 | TIP_OUT_OF_RANGE |
 | payments | status | enum | да | CREATED/PENDING/SUCCESS/DECLINED/CANCELED | SUCCESS | — |
+| payments | merchant_id | string | да | m_NNN | m_001 | MERCHANT_NOT_FOUND |
+| payments | employee_id | string | да | e_NNN | e_001 | EMPLOYEE_NOT_FOUND |
+| payments | timestamp | datetime | да | ISO 8601 | 2025-11-01T18:00:00Z | — |
 
 ## Твоя таблица — employees
 
@@ -36,19 +39,19 @@
 
 | Поле | Тип | Обяз. | Ограничение | Пример | Код ошибки |
 |---|---|---|---|---|---|
-| qr_id | string | да | qr_NNNN, уникален | qr_0001 | — |
+| qr_id | string | да | qr_NNN, уникален | qr_001 | — |
 | merchant_id | string | да | m_NNN, ссылка на merchants.merchant_id | m_001 | MERCHANT_NOT_FOUND |
 | employee_id | string | да | e_NNN, ссылка на employees.employee_id | e_001 | EMPLOYEE_NOT_FOUND |
-| receipt_id | string | да | r_NNNN, уникален в рамках чека | r_0001 | — |
-| nonce | string | да | одноразовый, ровно 6 hex-символов | a1b2c3 | INVALID_NONCE |
-| exp | datetime | да | ISO 8601 UTC, > now, обычно now + 24 ч | 2025-01-01T12:00:00Z | QR_EXPIRED |
-| signature | string | да | HMAC-SHA256, 16 hex-символов | 9f8e7d6c5b4a3928 | INVALID_SIGNATURE |
+| receipt_id | string | да | r_NNNN, уникален для мерчанта | r_1001 | — |
+| nonce | string | да | одноразовый, ровно 6 hex-символов | c82561 | QR_USED |
+| exp | datetime | да | ISO 8601 UTC, > now, обычно now + 24 ч | 2025-11-01T23:59:00Z | QR_EXPIRED |
+| signature | string | да | HMAC-SHA256, 16 hex-символов | 68d0f361ac38c12b | INVALID_QR |
 
 ## Критерий приёмки
 
 - [x] Все 4 файла описаны (22 колонки)
 - [x] Для каждого поля указан тип и ограничение
-- [x] Для полей с валидацией — код ошибки из 08_errors.md
+- [x] Для полей с валидацией — код ошибки из 07_payment_emulator_template.md §7
 - [x] Пример взят из реального CSV
 - [x] payment_details — только маска (****NNNN)
 
