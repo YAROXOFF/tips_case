@@ -19,8 +19,13 @@ const string QR_GEN_FILE       = "qr_links_generated.csv";
 const string PAYMENTS_OUT_FILE = "payments_out.csv";
 const string SECRET_KEY        = "demo-secret-k3";
 
+// === Ограничения ===
+const double BASE_AMOUNT      = 1000.0;      // fallback для старых QR без UNPAID
+const double MAX_CHECK_AMOUNT = 1000000.0;   // верхняя граница чека при создании QR
+const double MAX_TOTAL_AMOUNT = 1200000.0;   // P-3: верхняя граница суммы с чаевыми
+
 // =====================================================================
-// ИСПРАВЛЕННАЯ РЕАЛИЗАЦИЯ SHA-256 И HMAC (честная проверка подписи)
+// РЕАЛИЗАЦИЯ SHA-256 И HMAC (нужно для проверки подписи QR - Q-1)
 // =====================================================================
 namespace SHA256 {
     uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
@@ -62,7 +67,6 @@ namespace SHA256 {
         state[4] += e; state[5] += f; state[6] += g; state[7] += h;
     }
 
-    // Вспомогательная функция: возвращает СЫРЫЕ 32 байта хеша (как в Python digest())
     void hash_raw(const string& input, uint8_t out[32]) {
         uint32_t state[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
         uint64_t bit_len = input.length() * 8;
@@ -84,7 +88,6 @@ namespace SHA256 {
         }
     }
 
-    // Правильный HMAC-SHA256 (использует сырые байты для внутреннего хеша)
     string hmac_sha256(const string& key, const string& msg) {
         uint8_t o_key_pad[64], i_key_pad[64];
         memset(o_key_pad, 0x5c, 64);
@@ -95,17 +98,14 @@ namespace SHA256 {
             i_key_pad[i] ^= key[i];
         }
         
-        // Внутренний хеш
         string inner_in = string((char*)i_key_pad, 64) + msg;
         uint8_t inner_hash[32];
         hash_raw(inner_in, inner_hash);
         
-        // Внешний хеш
         string outer_in = string((char*)o_key_pad, 64) + string((char*)inner_hash, 32);
         uint8_t outer_hash[32];
         hash_raw(outer_in, outer_hash);
         
-        // Перевод в hex-строку
         stringstream ss;
         for (int i = 0; i < 32; ++i) {
             ss << hex << setw(2) << setfill('0') << (int)outer_hash[i];
@@ -114,7 +114,7 @@ namespace SHA256 {
     }
 }
 
-// === Вспомогательные функции ===
+// === Вспомогательные функции (ВОЗВРАЩЕНЫ!) ===
 vector<string> split(const string& line) {
     vector<string> result;
     stringstream ss(line);
@@ -127,6 +127,15 @@ string money(double v) {
     char buf[32];
     snprintf(buf, sizeof(buf), "%.2f", v);
     return string(buf);
+}
+
+// Формат денег для CSV (точка вместо запятой)
+string money_csv(double v) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.2f", v);
+    string s(buf);
+    for (auto& c : s) if (c == ',') c = '.';
+    return s;
 }
 
 bool file_empty_or_missing(string filename) {
@@ -143,6 +152,50 @@ string generate_hex(int len) {
     string res = "";
     for (int i = 0; i < len; i++) res += hex[rand() % 16];
     return res;
+}
+
+// Обновляет запись платежа по payment_id. Если нет — добавляет.
+bool update_or_append_payment(const string& payment_id,
+                              const string& m_id, const string& e_id,
+                              double amount, double tip,
+                              const string& status, const string& timestamp) {
+    ifstream in(PAYMENTS_OUT_FILE);
+    if (in.is_open()) {
+        vector<string> lines;
+        string line;
+        bool found = false;
+        while (getline(in, line)) {
+            vector<string> parts = split(line);
+            if (parts.size() >= 1 && parts[0] == payment_id) {
+                stringstream ss;
+                ss << payment_id << "," << m_id << "," << e_id << ","
+                   << money_csv(amount) << "," << money_csv(tip) << ","
+                   << status << "," << timestamp;
+                line = ss.str();
+                found = true;
+            }
+            lines.push_back(line);
+        }
+        in.close();
+        if (found) {
+            ofstream out(PAYMENTS_OUT_FILE);
+            if (!out.is_open()) return false;
+            for (auto& l : lines) out << l << "\n";
+            out.close();
+            return true;
+        }
+    }
+    
+    bool need_header = file_empty_or_missing(PAYMENTS_OUT_FILE);
+    ofstream out(PAYMENTS_OUT_FILE, ios::app);
+    if (!out.is_open()) return false;
+    if (need_header)
+        out << "payment_id,merchant_id,employee_id,amount,tip,status,timestamp" << endl;
+    out << payment_id << "," << m_id << "," << e_id << ","
+        << money_csv(amount) << "," << money_csv(tip) << ","
+        << status << "," << timestamp << endl;
+    out.close();
+    return true;
 }
 
 // === Поиск по файлам ===
@@ -180,7 +233,8 @@ string get_merchant_status(string m_id) {
     return "";
 }
 
-bool find_qr_in_file(string filename, string target, string& m_id, string& e_id, string& r_id, string& nonce, string& exp, string& sig) {
+bool find_qr_in_file(string filename, string target, string& m_id, string& e_id,
+                     string& r_id, string& nonce, string& exp, string& sig) {
     ifstream f(filename);
     if (!f.is_open()) return false;
     string line;
@@ -198,7 +252,8 @@ bool find_qr_in_file(string filename, string target, string& m_id, string& e_id,
     return false;
 }
 
-bool find_qr(string target, string& m_id, string& e_id, string& r_id, string& nonce, string& exp, string& sig) {
+bool find_qr(string target, string& m_id, string& e_id, string& r_id,
+             string& nonce, string& exp, string& sig) {
     if (find_qr_in_file(QR_FILE, target, m_id, e_id, r_id, nonce, exp, sig)) return true;
     if (find_qr_in_file(QR_GEN_FILE, target, m_id, e_id, r_id, nonce, exp, sig)) return true;
     return false;
@@ -253,7 +308,8 @@ bool receipt_exists(string m_id, string r_id) {
 void generate_qr(string m_id, string e_id) {
     string status = get_merchant_status(m_id);
     if (status != "ACTIVE") {
-        cout << "Ошибка: мерчант в статусе " << status << " — QR не создаётся (MERCHANT_BLOCKED)" << endl;
+        cout << "Ошибка: мерчант в статусе " << status
+             << " — QR не создаётся (MERCHANT_BLOCKED)" << endl;
         return;
     }
     string r_id;
@@ -265,15 +321,29 @@ void generate_qr(string m_id, string e_id) {
         return;
     }
 
+    double base_amount = 0.0;
+    while (true) {
+        cout << "Введите сумму чека в рублях (например, 1500 или 1500.50): ";
+        string amt_str;
+        cin >> amt_str;
+        for (auto& ch : amt_str) if (ch == ',') ch = '.'; 
+        char* endp = nullptr;
+        base_amount = strtod(amt_str.c_str(), &endp);
+        if (endp == amt_str.c_str() || *endp != '\0' || base_amount <= 0.0 || base_amount > MAX_CHECK_AMOUNT) {
+            cout << "Ошибка: введите число от 0.01 до " << money(MAX_CHECK_AMOUNT) << " руб." << endl;
+            continue;
+        }
+        break;
+    }
+
     int next_num = find_max_qr_number() + 1;
     string qr_id = format_qr_id(next_num);
     string nonce = generate_hex(6);
     string exp   = "2025-12-31T23:59:00Z";
-    
-    // Считаем настоящую подпись HMAC для нового QR!
+
     string payload = m_id + "|" + e_id + "|" + r_id + "|" + nonce + "|" + exp;
     string full_hash = SHA256::hmac_sha256(SECRET_KEY, payload);
-    string sig = full_hash.substr(0, 16); // Берем первые 16 символов
+    string sig = full_hash.substr(0, 16);
 
     bool need_header = file_empty_or_missing(QR_GEN_FILE);
     ofstream f(QR_GEN_FILE, ios::app);
@@ -281,16 +351,28 @@ void generate_qr(string m_id, string e_id) {
         cout << "Ошибка записи в " << QR_GEN_FILE << endl;
         return;
     }
-    if (need_header) f << "qr_id,merchant_id,employee_id,receipt_id,nonce,exp,signature" << endl;
-    f << qr_id << "," << m_id << "," << e_id << "," << r_id << "," << nonce << "," << exp << "," << sig << endl;
+    if (need_header)
+        f << "qr_id,merchant_id,employee_id,receipt_id,nonce,exp,signature" << endl;
+    f << qr_id << "," << m_id << "," << e_id << "," << r_id << ","
+      << nonce << "," << exp << "," << sig << endl;
     f.close();
+
+    // Отправляем QR в файл оплаты со статусом UNPAID
+    string payment_id = "p_" + qr_id.substr(3);
+    bool unpaid_ok = update_or_append_payment(payment_id, m_id, e_id, base_amount, 0.0, "UNPAID", "0000-00-00T00:00:00Z");
 
     cout << "\n=== QR УСПЕШНО СОЗДАН (записан в " << QR_GEN_FILE << ") ===" << endl;
     cout << "ID:        " << qr_id << endl;
     cout << "Мерчант:   " << m_id << endl;
     cout << "Официант:  " << e_id << endl;
     cout << "Чек:       " << r_id << endl;
+    cout << "Сумма:     " << money(base_amount) << " руб." << endl;
     cout << "Истекает:  " << exp << endl;
+    if (unpaid_ok) {
+        cout << "Платёж " << payment_id << " создан со статусом UNPAID в " << PAYMENTS_OUT_FILE << endl;
+    } else {
+        cout << "Предупреждение: не удалось создать запись UNPAID в " << PAYMENTS_OUT_FILE << endl;
+    }
     cout << "Сообщите клиенту ID: " << qr_id << endl;
 }
 
@@ -308,6 +390,7 @@ void show_merchant_report(string m_id) {
         while (getline(f, line)) {
             vector<string> parts = split(line);
             if (parts.size() < 6 || parts[1] != m_id) continue;
+            if (parts[5] == "UNPAID") continue;
             payments_count++;
             if (parts[5] == "SUCCESS") {
                 double tip = atof(parts[4].c_str()), amount = atof(parts[3].c_str());
@@ -355,6 +438,7 @@ void show_officer_tips(string e_id) {
         while (getline(f, line)) {
             vector<string> parts = split(line);
             if (parts.size() < 6 || parts[2] != e_id) continue;
+            if (parts[5] == "UNPAID") continue;
             total_count++;
             if (parts[5] == "SUCCESS") {
                 tips_total += atof(parts[4].c_str()); success_count++;
@@ -416,57 +500,64 @@ void client_pay() {
     cout << "Введите ID QR-кода с чека (например, qr_001): ";
     string target; cin >> target;
 
-    // 1. Поиск QR
     string m_id, e_id, r_id, nonce, exp, sig;
     if (!find_qr(target, m_id, e_id, r_id, nonce, exp, sig)) {
         cout << "Ошибка: QR не найден (INVALID_QR)" << endl;
         return;
     }
 
-    // 2. Проверка срока действия (Q-2)
     string now = "2025-11-01T12:00:00Z";
     if (exp < now) {
         cout << "Ошибка: QR истёк (QR_EXPIRED)" << endl;
         return;
     }
 
-    // 3. Проверка подписи HMAC (Q-1)
     string payload = m_id + "|" + e_id + "|" + r_id + "|" + nonce + "|" + exp;
     string full_hash = SHA256::hmac_sha256(SECRET_KEY, payload);
     string expected_sig = full_hash.substr(0, 16);
-    
     if (expected_sig != sig) {
         cout << "Ошибка: Неверная подпись QR! (INVALID_QR)" << endl;
         return;
     }
     cout << "[OK] Подпись QR проверена (HMAC-SHA256)." << endl;
 
-    // 4. ПРОВЕРКА ИДЕМПОТЕНТНОСТИ (P-2)
     string payment_id = "p_" + target.substr(3);
+    bool already_paid  = false;
+    bool found_unpaid  = false;
+    double stored_amount = 0.0;
+
     ifstream check_out(PAYMENTS_OUT_FILE);
     if (check_out.is_open()) {
         string line;
         getline(check_out, line);
         while (getline(check_out, line)) {
-            if (line.find(payment_id + ",") == 0) { // Если такой ID уже есть
-                cout << "\n[P-2] Платёж по этому QR уже создан ранее!" << endl;
-                cout << "Возврат существующего платежа. Новый не создаём." << endl;
-                check_out.close();
-                return;
+            vector<string> parts = split(line);
+            if (parts.size() >= 6 && parts[0] == payment_id) {
+                if (parts[5] != "UNPAID") {
+                    already_paid = true;
+                } else {
+                    found_unpaid  = true;
+                    stored_amount = atof(parts[3].c_str());
+                }
             }
         }
         check_out.close();
     }
 
-    // 5. Проверка статуса мерчанта
+    if (already_paid) {
+        cout << "\n[P-2] Платёж по этому QR уже был обработан ранее!" << endl;
+        cout << "Возврат существующего платежа. Новый не создаём." << endl;
+        return;
+    }
+
+    double base_amount = found_unpaid ? stored_amount : BASE_AMOUNT;
+
     string m_status = get_merchant_status(m_id);
     if (m_status != "ACTIVE") {
         cout << "Ошибка: заведение недоступно (MERCHANT_BLOCKED, " << m_status << ")" << endl;
         return;
     }
 
-    // 6. Ввод чаевых
-    double base_amount = 1000.0;
     cout << "\nЗаведение: " << m_id << " (официант " << e_id << ")" << endl;
     cout << "Чек: " << money(base_amount) << " руб." << endl;
     cout << "\nВыберите чаевые:\n1. 5%\n2. 10%\n3. 20%\n4. Своя сумма\n5. Без чаевых\nВыбор: ";
@@ -483,31 +574,24 @@ void client_pay() {
 
     double tip = base_amount * tip_pct / 100.0;
     double total = base_amount + tip;
-    
-    // Проверка P-3
-    if (total > 1200000) {
+
+    if (total > MAX_TOTAL_AMOUNT) {
         cout << "Ошибка: AMOUNT_OUT_OF_RANGE" << endl;
         return;
     }
 
-    // 7. Эмулятор шлюза (h = номер из QR ID % 10, как в CSV)
     int qr_num = atoi(target.substr(3).c_str());
     int h = qr_num % 10;
     string status;
-
-    if (h <= 6)      { status = "SUCCESS";  cout << "\n[Эмулятор] SUCCESS: спасибо за чаевые!" << endl; }
+    if (h <= 6)      { status = "SUCCESS";  cout << "\n[Эмулятор] SUCCESS: Оплата прошла успешно." << endl; }
     else if (h == 7) { status = "DECLINED"; cout << "\n[Эмулятор] DECLINED: банк отклонил." << endl; }
     else if (h == 8) { status = "PENDING";  cout << "\n[Эмулятор] PENDING (timeout)." << endl; }
     else             { status = "CANCELED"; cout << "\n[Эмулятор] CANCELED." << endl; }
 
-    // 8. Запись
-    bool need_header = file_empty_or_missing(PAYMENTS_OUT_FILE);
-    ofstream out(PAYMENTS_OUT_FILE, ios::app);
-    if (out.is_open()) {
-        if (need_header) out << "payment_id,merchant_id,employee_id,amount,tip,status,timestamp" << endl;
-        out << payment_id << "," << m_id << "," << e_id << "," << money(base_amount) << "," << money(tip) << "," << status << ",2025-11-01T18:00:00Z" << endl;
-        out.close();
-        cout << "Платёж записан в " << PAYMENTS_OUT_FILE << endl;
+    if (update_or_append_payment(payment_id, m_id, e_id, base_amount, tip, status, "2025-11-01T18:00:00Z")) {
+        cout << "Платёж " << payment_id << " обновлён: " << status << " (файл " << PAYMENTS_OUT_FILE << ")" << endl;
+    } else {
+        cout << "Ошибка: не удалось обновить/сохранить платёж." << endl;
     }
 }
 
@@ -532,16 +616,15 @@ void login_officer() {
 
 // === main ===
 int main() {
-    system("chcp 1251 > nul"); // Чтобы русский текст отображался в Windows консоли
+    system("chcp 1251 > nul"); 
     setlocale(LC_ALL, "ru_RU.UTF-8");
-
     srand(time(0));
-    
+
     while (true) {
-        cout << "\n===================================" << endl;
-        cout << "   ПЛАТФОРМА ЧАЕВЫХ 'ВКУС-СЕРВИС'" << endl;
-        cout << "===================================" << endl;
-        cout << "1. Вход мерчанта\n2. Вход официанта\n3. Оплатить чаевые (клиент)\n0. Выход\nВыберите: ";
+        cout << "\n======================================" << endl;
+        cout << "  ПЛАТФОРМА ДЛЯ ОПЛАТЫ 'ВКУС-СЕРВИС'" << endl;
+        cout << "======================================" << endl;
+        cout << "1. Вход мерчанта\n2. Вход официанта\n3. Оплатить (клиент)\n0. Выход\nВыберите: ";
         int c; cin >> c;
         if      (c == 1) login_merchant();
         else if (c == 2) login_officer();
